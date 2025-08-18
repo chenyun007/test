@@ -407,10 +407,20 @@ class Board:
         return eliminated_count
 
     def find_valid_moves(self) -> List[Move]:
-        # 仅返回“能直接带来消除”的移动，避免无效来回
-        candidate_moves: List[Move] = []
+        # 优先使用束搜索，寻找对后续更有利的立即消除型移动
+        beam_moves = self._beam_search_moves(max_depth=2, beam_width=8)
+        if beam_moves:
+            return [beam_moves[0]]
 
-        # 传统方法：尝试每个棋子的每个可达位置
+        # 回退到单步贪心（只返回立即消除的移动）
+        candidate_moves = self._generate_immediate_elimination_moves()
+        if candidate_moves:
+            candidate_moves.sort(key=lambda m: m.score, reverse=True)
+            return candidate_moves[:3]
+        return []
+
+    def _generate_immediate_elimination_moves(self) -> List[Move]:
+        moves: List[Move] = []
         for piece, positions in self.piece_groups.items():
             for start_pos in positions:
                 for dr, dc in [(0, 1), (0, -1), (1, 0), (-1, 0)]:
@@ -423,23 +433,65 @@ class Board:
                         if not end_pos.is_valid():
                             break
 
-                        # 对空位进行滑动尝试；对相邻或更远位置进行链式推挤尝试
                         temp_board = Board([row[:] for row in self.state])
                         temp_move = Move(start_pos, end_pos, piece)
                         if temp_board.execute_move(temp_move):
-                            # 仅保留带来消除的移动
                             if temp_move.eliminated_pairs:
                                 temp_move.score = self._evaluate_move_value(temp_move, temp_board)
-                                candidate_moves.append(temp_move)
-
-                        # 如果下一步依然可能（空位继续前进，或存在棋子但仍可能推挤），继续尝试
+                                moves.append(temp_move)
                         steps += 1
+        return moves
 
-        if candidate_moves:
-            candidate_moves.sort(key=lambda m: m.score, reverse=True)
-            return candidate_moves[:3]
+    def _evaluate_board(self) -> float:
+        # 局面评分：更少的棋子、更靠中心、更多潜在可消对
+        score = 0.0
+        score -= self.count_pieces() * 1.0
+        pairs = self.find_elimination_pairs()
+        score += len(pairs) * 4.0
+        # 中心性奖励：统计所有棋子到中心的负距离
+        center_row, center_col = ROWS // 2, COLS // 2
+        for r in range(ROWS):
+            for c in range(COLS):
+                if self.state[r][c] != EMPTY:
+                    score -= (abs(r - center_row) + abs(c - center_col)) * 0.05
+        return score
 
-        return []
+    def _beam_search_moves(self, max_depth: int = 2, beam_width: int = 8) -> List[Move]:
+        # 节点为(累计评分, move序列, 棋盘)
+        initial_candidates = self._generate_immediate_elimination_moves()
+        if not initial_candidates:
+            return []
+
+        beam = []
+        for mv in initial_candidates:
+            temp_board = Board([row[:] for row in self.state])
+            if temp_board.execute_move(mv):
+                beam.append((temp_board._evaluate_board(), [mv], temp_board))
+
+        beam.sort(key=lambda x: x[0], reverse=True)
+        beam = beam[:beam_width]
+
+        best_sequence: List[Move] = beam[0][1] if beam else []
+
+        depth = 1
+        while depth < max_depth and beam:
+            next_beam = []
+            for score_so_far, seq, b in beam:
+                next_moves = b._generate_immediate_elimination_moves()
+                for nm in next_moves:
+                    nb = Board([row[:] for row in b.state])
+                    if nb.execute_move(nm):
+                        new_seq = seq + [nm]
+                        new_score = score_so_far + nb._evaluate_board()
+                        next_beam.append((new_score, new_seq, nb))
+            if not next_beam:
+                break
+            next_beam.sort(key=lambda x: x[0], reverse=True)
+            beam = next_beam[:beam_width]
+            best_sequence = beam[0][1]
+            depth += 1
+
+        return best_sequence
 
     def _find_traditional_moves(self) -> List[Move]:
         all_moves = []
