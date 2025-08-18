@@ -1,6 +1,16 @@
 import random
 from copy import deepcopy
-from colorama import init, Fore, Back, Style
+try:
+    from colorama import init, Fore, Back, Style
+except Exception:  # Fallback if colorama is not installed
+    def init():
+        return None
+    class _NoColor:
+        def __getattr__(self, name):
+            return ""
+    Fore = _NoColor()
+    Back = _NoColor()
+    Style = _NoColor()
 from typing import List, Tuple, Optional, Dict, Set
 from dataclasses import dataclass
 
@@ -253,9 +263,13 @@ class Board:
                 return eliminated_count > 0
             return False
         else:
+            # 保存原始状态，若移动后不能产生消除则回滚
+            original_state = [row[:] for row in self.state]
+            original_groups = {k: v[:] for k, v in self.piece_groups.items()}
+            original_empty = [cluster[:] for cluster in self.empty_clusters]
+
             self._execute_move_with_pushing(move)
-            self.move_history.append(move)
-            
+
             pairs = self.find_elimination_pairs()
             valid_pairs = []
             for pair in pairs:
@@ -263,37 +277,77 @@ class Board:
                 if (pos1.row == move.end.row and pos1.col == move.end.col) or \
                    (pos2.row == move.end.row and pos2.col == move.end.col):
                     valid_pairs.append(pair)
-            
+
             if valid_pairs:
                 move.eliminated_pairs = [valid_pairs[0]]
                 self.eliminate_pairs([valid_pairs[0]])
+                self.move_history.append(move)
+                return True
             else:
+                # 回滚
+                self.state = original_state
+                self.piece_groups = original_groups
+                self.empty_clusters = original_empty
                 move.eliminated_pairs = []
-            return True
+                return False
 
     def _execute_move_with_pushing(self, move: Move) -> None:
         move.pushed_pieces.clear()
         move.move_path.clear()
-        
+
         dr = move.end.row - move.start.row
         dc = move.end.col - move.start.col
-        
+
         if dr != 0:
             dr = dr // abs(dr)
         if dc != 0:
             dc = dc // abs(dc)
-        
-        current_pos = move.start
-        while current_pos != move.end:
-            move.move_path.append(current_pos)
-            current_pos = Position(current_pos.row + dr, current_pos.col + dc)
+
+        # 仅允许直线移动
+        if dr != 0 and dc != 0:
+            return
+
+        # 路径（不含终点）必须为空
+        path_pos = Position(move.start.row + dr, move.start.col + dc)
+        while path_pos != move.end:
+            if not self.is_empty(path_pos):
+                return
+            move.move_path.append(path_pos)
+            path_pos = Position(path_pos.row + dr, path_pos.col + dc)
         move.move_path.append(move.end)
-        
-        self.set_piece(move.end, move.piece)
-        self.set_piece(move.start, EMPTY)
-        
-        self._chain_push_from_position(move.start, dr, dc, move)
-        
+
+        start_piece = move.piece
+        end_piece = self.get_piece(move.end)
+
+        if end_piece == EMPTY:
+            # 普通滑动
+            self.set_piece(move.end, start_piece)
+            self.set_piece(move.start, EMPTY)
+        else:
+            # 相邻推挤：从终点开始沿移动方向寻找第一个空位
+            chain_positions = []
+            check_pos = move.end
+            while check_pos.is_valid() and not self.is_empty(check_pos):
+                chain_positions.append(check_pos)
+                check_pos = Position(check_pos.row + dr, check_pos.col + dc)
+
+            # 无空位则无法推挤
+            if not check_pos.is_valid() or not self.is_empty(check_pos):
+                return
+
+            # 从链尾开始依次向前移动一格
+            for idx in range(len(chain_positions) - 1, -1, -1):
+                from_pos = chain_positions[idx]
+                to_pos = Position(from_pos.row + dr, from_pos.col + dc)
+                piece_to_push = self.get_piece(from_pos)
+                self.set_piece(to_pos, piece_to_push)
+                self.set_piece(from_pos, EMPTY)
+                move.pushed_pieces.append((piece_to_push, from_pos, to_pos))
+
+            # 将起始棋子放入终点
+            self.set_piece(move.end, start_piece)
+            self.set_piece(move.start, EMPTY)
+
         self._update_piece_groups()
         self._update_empty_clusters()
 
@@ -309,10 +363,12 @@ class Board:
                     self._push_piece_chain(neighbor_pos, dr, dc, move)
 
     def _is_in_move_direction(self, pos: Position, start_pos: Position, dr: int, dc: int) -> bool:
+        # 当水平移动时，推动应作用于与起点同列的相邻棋子（上下方向）
         if dr == 0:  # 水平移动
-            return pos.row == start_pos.row
-        elif dc == 0:  # 垂直移动
             return pos.col == start_pos.col
+        # 当垂直移动时，推动应作用于与起点同行的相邻棋子（左右方向）
+        elif dc == 0:  # 垂直移动
+            return pos.row == start_pos.row
         return False
 
     def _push_piece_chain(self, start_pos: Position, dr: int, dc: int, move: Move):
@@ -337,12 +393,30 @@ class Board:
             self.set_piece(from_pos, EMPTY)
 
     def eliminate_pairs(self, pairs: List[Tuple[Position, Position]]) -> int:
+        # 优先选择对后续更有利的那一对（如同类多/打通通道）
+        if not pairs:
+            return 0
+
+        def pair_value(p: Tuple[Position, Position]) -> float:
+            p1, p2 = p
+            piece = self.get_piece(p1)
+            # 少量种类优先清除（避免残子）
+            freq = sum(1 for r in range(ROWS) for c in range(COLS) if self.state[r][c] == piece)
+            value = 5.0 / max(freq, 1)
+            # 行列通道潜力
+            if p1.row == p2.row:
+                value += 0.5 * (self._empty_between_in_row(p1, p2))
+            if p1.col == p2.col:
+                value += 0.5 * (self._empty_between_in_col(p1, p2))
+            return value
+
+        best_pair = max(pairs, key=pair_value)
+        pos1, pos2 = best_pair
         eliminated_count = 0
-        for pos1, pos2 in pairs:
-            if self.can_eliminate(pos1, pos2):
-                self.set_piece(pos1, EMPTY)
-                self.set_piece(pos2, EMPTY)
-                eliminated_count += 2
+        if self.can_eliminate(pos1, pos2):
+            self.set_piece(pos1, EMPTY)
+            self.set_piece(pos2, EMPTY)
+            eliminated_count += 2
 
         if eliminated_count > 0:
             self._update_piece_groups()
@@ -350,22 +424,158 @@ class Board:
 
         return eliminated_count
 
+    def _empty_between_in_row(self, p1: Position, p2: Position) -> int:
+        if p1.row != p2.row:
+            return 0
+        left, right = sorted([p1.col, p2.col])
+        return sum(1 for c in range(left + 1, right) if self.state[p1.row][c] == EMPTY)
+
+    def _empty_between_in_col(self, p1: Position, p2: Position) -> int:
+        if p1.col != p2.col:
+            return 0
+        top, bottom = sorted([p1.row, p2.row])
+        return sum(1 for r in range(top + 1, bottom) if self.state[r][p1.col] == EMPTY)
+
     def find_valid_moves(self) -> List[Move]:
-        # 首先尝试目标导向搜索
-        target_solver = TargetOrientedDFS(self)
-        best_moves = target_solver.solve()
-        
-        if best_moves:
-            return [best_moves[0]]
-        
-        # 如果目标导向搜索失败，使用传统方法
-        traditional_moves = self._find_traditional_moves()
-        if traditional_moves:
-            return traditional_moves
-        
-        # 如果传统方法也失败，尝试更简单的移动检测
-        simple_moves = self._find_simple_moves()
-        return simple_moves
+        # 优先使用束搜索，寻找对后续更有利的立即消除型移动
+        beam_moves = self._beam_search_moves(max_depth=3, beam_width=10)
+        if beam_moves:
+            return [beam_moves[0]]
+
+        # 回退到单步贪心（只返回立即消除的移动）
+        candidate_moves = self._generate_immediate_elimination_moves()
+        if candidate_moves:
+            candidate_moves.sort(key=lambda m: m.score, reverse=True)
+            return candidate_moves[:3]
+        return []
+
+    def _generate_immediate_elimination_moves(self) -> List[Move]:
+        moves: List[Move] = []
+        simulation_budget = 1500  # 上限，防止爆算（中等配额）
+        for piece, positions in self.piece_groups.items():
+            for start_pos in positions:
+                for dr, dc in [(0, 1), (0, -1), (1, 0), (-1, 0)]:
+                    steps = 1
+                    while True:
+                        end_row = start_pos.row + dr * steps
+                        end_col = start_pos.col + dc * steps
+                        end_pos = Position(end_row, end_col)
+
+                        if not end_pos.is_valid():
+                            break
+
+                        temp_board = Board([row[:] for row in self.state])
+                        temp_move = Move(start_pos, end_pos, piece)
+                        if temp_board.execute_move(temp_move):
+                            if temp_move.eliminated_pairs:
+                                temp_move.score = self._evaluate_move_value(temp_move, temp_board)
+                                moves.append(temp_move)
+                        simulation_budget -= 1
+                        if simulation_budget <= 0:
+                            return moves
+                        steps += 1
+        return moves
+
+    def _evaluate_board(self) -> float:
+        # 局面评分：更少的棋子、更多潜在可消、更高机动性、更长空走廊
+        score = 0.0
+        remaining = self.count_pieces()
+        score -= remaining * 1.0
+        pairs = self.find_elimination_pairs()
+        score += len(pairs) * 4.5
+        mobility = len(self._generate_immediate_elimination_moves())
+        score += mobility * 1.0
+        score += self._max_empty_run() * 0.1
+        # 中心性轻微约束
+        center_row, center_col = ROWS // 2, COLS // 2
+        for r in range(ROWS):
+            for c in range(COLS):
+                if self.state[r][c] != EMPTY:
+                    score -= (abs(r - center_row) + abs(c - center_col)) * 0.03
+        return score
+
+    def _max_empty_run(self) -> int:
+        # 统计行列中最长连续空位长度，用于鼓励打开走廊
+        best = 0
+        # 行
+        for r in range(ROWS):
+            cur = 0
+            for c in range(COLS):
+                if self.state[r][c] == EMPTY:
+                    cur += 1
+                    best = max(best, cur)
+                else:
+                    cur = 0
+        # 列
+        for c in range(COLS):
+            cur = 0
+            for r in range(ROWS):
+                if self.state[r][c] == EMPTY:
+                    cur += 1
+                    best = max(best, cur)
+                else:
+                    cur = 0
+        return best
+
+    def _beam_search_moves(self, max_depth: int = 2, beam_width: int = 8) -> List[Move]:
+        # 节点为(累计评分, move序列, 棋盘)
+        initial_candidates = self._generate_immediate_elimination_moves()
+        if not initial_candidates:
+            return []
+
+        # 限制初始候选数量（中等配额）
+        initial_candidates.sort(key=lambda m: m.score, reverse=True)
+        initial_candidates = initial_candidates[:30]
+
+        beam = []
+        visited = set()
+        for mv in initial_candidates:
+            temp_board = Board([row[:] for row in self.state])
+            if temp_board.execute_move(mv):
+                state_hash = str(temp_board.state)
+                if state_hash in visited:
+                    continue
+                visited.add(state_hash)
+                beam.append((temp_board._evaluate_board(), [mv], temp_board))
+
+        beam.sort(key=lambda x: x[0], reverse=True)
+        beam = beam[:beam_width]
+
+        best_sequence: List[Move] = beam[0][1] if beam else []
+
+        depth = 1
+        while depth < max_depth and beam:
+            next_beam = []
+            expansions = 0
+            level_visited = set()
+            for score_so_far, seq, b in beam:
+                next_moves = b._generate_immediate_elimination_moves()
+                # 仅扩展前若干高分移动（中等配额）
+                next_moves.sort(key=lambda m: m.score, reverse=True)
+                next_moves = next_moves[:20]
+                for nm in next_moves:
+                    nb = Board([row[:] for row in b.state])
+                    if nb.execute_move(nm):
+                        state_hash = str(nb.state)
+                        if state_hash in level_visited:
+                            continue
+                        level_visited.add(state_hash)
+                        new_seq = seq + [nm]
+                        new_score = score_so_far + nb._evaluate_board()
+                        next_beam.append((new_score, new_seq, nb))
+                        expansions += 1
+                        if expansions >= beam_width * 20:
+                            break
+                if expansions >= beam_width * 20:
+                    break
+            if not next_beam:
+                break
+            next_beam.sort(key=lambda x: x[0], reverse=True)
+            beam = next_beam[:beam_width]
+            best_sequence = beam[0][1]
+            depth += 1
+
+        return best_sequence
 
     def _find_traditional_moves(self) -> List[Move]:
         all_moves = []
@@ -411,23 +621,35 @@ class Board:
     def _evaluate_move_value(self, move: Move, temp_board: 'Board') -> float:
         score = 0.0
         score += 5.0
-        
+
+        # 直接消除收益
         if move.eliminated_pairs:
-            score += len(move.eliminated_pairs) * 15.0
-        
+            score += len(move.eliminated_pairs) * 18.0
+            # 稀有类型加成（以当前局面频次衡量）
+            pos1, pos2 = move.eliminated_pairs[0]
+            piece_kind = self.get_piece(move.start) if not move.is_in_place else self.get_piece(pos1)
+            freq = sum(1 for r in range(ROWS) for c in range(COLS) if self.state[r][c] == piece_kind)
+            if freq > 0:
+                score += 6.0 / freq
+
+        # 距离与推动成本
         if not move.is_in_place:
             distance = move.start.distance_to(move.end)
-            score -= distance * 1.0
-        
-        score -= len(move.pushed_pieces) * 3.0
-        
+            score -= distance * 0.8
+        score -= len(move.pushed_pieces) * 2.5
+
+        # 新局面可消潜力与机动性
         new_pairs = temp_board.find_elimination_pairs()
-        score += len(new_pairs) * 3.0
-        
+        score += len(new_pairs) * 4.0
+        mobility = len(temp_board._generate_immediate_elimination_moves())
+        score += mobility * 1.2
+
+        # 中心性与空走廊奖励
         center_row, center_col = ROWS // 2, COLS // 2
         center_distance = abs(move.end.row - center_row) + abs(move.end.col - center_col)
-        score -= center_distance * 0.5
-        
+        score -= center_distance * 0.4
+        score += temp_board._max_empty_run() * 0.08
+
         return score
 
     def _find_simple_moves(self) -> List[Move]:
@@ -721,21 +943,21 @@ def play_game():
                 print("没有找到有效的移动，游戏结束！")
                 break
 
-            move = valid_moves[0]
-            move_count += 1
-
-            print(f"\n第 {move_count} 步：")
-            print(f"移动: {move}")
-            print()
-
-            before_state = [row[:] for row in board.state]
-
-            if not board.execute_move(move):
-                print("移动失败，游戏结束！")
+            # 尝试候选移动，执行第一个真正带来消除的移动
+            executed = False
+            for move in valid_moves:
+                move_count += 1
+                print(f"\n第 {move_count} 步：")
+                print(f"移动: {move}")
+                print()
+                if board.execute_move(move):
+                    print(f"移动并消除完成，剩余棋子数量：{board.count_pieces()}")
+                    print("\n" + "="*60 + "\n")
+                    executed = True
+                    break
+            if not executed:
+                print("候选移动均未产生消除，游戏结束！")
                 break
-
-            print(f"移动完成，剩余棋子数量：{board.count_pieces()}")
-            print("\n" + "="*60 + "\n")
 
         if move_count >= MAX_MOVES:
             print("达到最大移动次数，游戏结束！")
@@ -751,4 +973,15 @@ def play_game():
     board.print_board(title="最终棋盘状态")
 
 if __name__ == '__main__':
-    play_game()
+    try:
+        import os
+        from game import run, run_exhaustive, run_full_exhaustive
+        # 默认先跑启发式策略
+        run()
+        # 再尝试穷举+回退搜索（带预算）以寻求进一步改进
+        run_exhaustive()
+        # 如需完全穷举，设置环境变量 FULL_EXHAUSTIVE=1
+        if os.environ.get('FULL_EXHAUSTIVE') == '1':
+            run_full_exhaustive()
+    except Exception:
+        play_game()
