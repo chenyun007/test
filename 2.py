@@ -263,9 +263,13 @@ class Board:
                 return eliminated_count > 0
             return False
         else:
+            # 保存原始状态，若移动后不能产生消除则回滚
+            original_state = [row[:] for row in self.state]
+            original_groups = {k: v[:] for k, v in self.piece_groups.items()}
+            original_empty = [cluster[:] for cluster in self.empty_clusters]
+
             self._execute_move_with_pushing(move)
-            self.move_history.append(move)
-            
+
             pairs = self.find_elimination_pairs()
             valid_pairs = []
             for pair in pairs:
@@ -273,13 +277,19 @@ class Board:
                 if (pos1.row == move.end.row and pos1.col == move.end.col) or \
                    (pos2.row == move.end.row and pos2.col == move.end.col):
                     valid_pairs.append(pair)
-            
+
             if valid_pairs:
                 move.eliminated_pairs = [valid_pairs[0]]
                 self.eliminate_pairs([valid_pairs[0]])
+                self.move_history.append(move)
+                return True
             else:
+                # 回滚
+                self.state = original_state
+                self.piece_groups = original_groups
+                self.empty_clusters = original_empty
                 move.eliminated_pairs = []
-            return True
+                return False
 
     def _execute_move_with_pushing(self, move: Move) -> None:
         move.pushed_pieces.clear()
@@ -363,21 +373,37 @@ class Board:
         return eliminated_count
 
     def find_valid_moves(self) -> List[Move]:
-        # 首先尝试目标导向搜索
-        target_solver = TargetOrientedDFS(self)
-        best_moves = target_solver.solve()
-        
-        if best_moves:
-            return [best_moves[0]]
-        
-        # 如果目标导向搜索失败，使用传统方法
-        traditional_moves = self._find_traditional_moves()
-        if traditional_moves:
-            return traditional_moves
-        
-        # 如果传统方法也失败，尝试更简单的移动检测
-        simple_moves = self._find_simple_moves()
-        return simple_moves
+        # 仅返回“能直接带来消除”的移动，避免无效来回
+        candidate_moves: List[Move] = []
+
+        # 传统方法：尝试每个棋子的每个可达空位
+        for piece, positions in self.piece_groups.items():
+            for start_pos in positions:
+                for dr, dc in [(0, 1), (0, -1), (1, 0), (-1, 0)]:
+                    steps = 1
+                    while True:
+                        end_row = start_pos.row + dr * steps
+                        end_col = start_pos.col + dc * steps
+                        end_pos = Position(end_row, end_col)
+
+                        if not end_pos.is_valid() or not self.is_empty(end_pos):
+                            break
+
+                        temp_board = Board([row[:] for row in self.state])
+                        temp_move = Move(start_pos, end_pos, piece)
+                        if temp_board.execute_move(temp_move):
+                            # 仅保留带来消除的移动
+                            if temp_move.eliminated_pairs:
+                                temp_move.score = self._evaluate_move_value(temp_move, temp_board)
+                                candidate_moves.append(temp_move)
+
+                        steps += 1
+
+        if candidate_moves:
+            candidate_moves.sort(key=lambda m: m.score, reverse=True)
+            return candidate_moves[:3]
+
+        return []
 
     def _find_traditional_moves(self) -> List[Move]:
         all_moves = []
@@ -733,21 +759,21 @@ def play_game():
                 print("没有找到有效的移动，游戏结束！")
                 break
 
-            move = valid_moves[0]
-            move_count += 1
-
-            print(f"\n第 {move_count} 步：")
-            print(f"移动: {move}")
-            print()
-
-            before_state = [row[:] for row in board.state]
-
-            if not board.execute_move(move):
-                print("移动失败，游戏结束！")
+            # 尝试候选移动，执行第一个真正带来消除的移动
+            executed = False
+            for move in valid_moves:
+                move_count += 1
+                print(f"\n第 {move_count} 步：")
+                print(f"移动: {move}")
+                print()
+                if board.execute_move(move):
+                    print(f"移动并消除完成，剩余棋子数量：{board.count_pieces()}")
+                    print("\n" + "="*60 + "\n")
+                    executed = True
+                    break
+            if not executed:
+                print("候选移动均未产生消除，游戏结束！")
                 break
-
-            print(f"移动完成，剩余棋子数量：{board.count_pieces()}")
-            print("\n" + "="*60 + "\n")
 
         if move_count >= MAX_MOVES:
             print("达到最大移动次数，游戏结束！")
