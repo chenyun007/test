@@ -294,26 +294,60 @@ class Board:
     def _execute_move_with_pushing(self, move: Move) -> None:
         move.pushed_pieces.clear()
         move.move_path.clear()
-        
+
         dr = move.end.row - move.start.row
         dc = move.end.col - move.start.col
-        
+
         if dr != 0:
             dr = dr // abs(dr)
         if dc != 0:
             dc = dc // abs(dc)
-        
-        current_pos = move.start
-        while current_pos != move.end:
-            move.move_path.append(current_pos)
-            current_pos = Position(current_pos.row + dr, current_pos.col + dc)
+
+        # 仅允许直线移动
+        if dr != 0 and dc != 0:
+            return
+
+        # 路径（不含终点）必须为空
+        path_pos = Position(move.start.row + dr, move.start.col + dc)
+        while path_pos != move.end:
+            if not self.is_empty(path_pos):
+                return
+            move.move_path.append(path_pos)
+            path_pos = Position(path_pos.row + dr, path_pos.col + dc)
         move.move_path.append(move.end)
-        
-        self.set_piece(move.end, move.piece)
-        self.set_piece(move.start, EMPTY)
-        
-        self._chain_push_from_position(move.start, dr, dc, move)
-        
+
+        start_piece = move.piece
+        end_piece = self.get_piece(move.end)
+
+        if end_piece == EMPTY:
+            # 普通滑动
+            self.set_piece(move.end, start_piece)
+            self.set_piece(move.start, EMPTY)
+        else:
+            # 相邻推挤：从终点开始沿移动方向寻找第一个空位
+            chain_positions = []
+            check_pos = move.end
+            while check_pos.is_valid() and not self.is_empty(check_pos):
+                chain_positions.append(check_pos)
+                check_pos = Position(check_pos.row + dr, check_pos.col + dc)
+
+            # 无空位则无法推挤
+            if not check_pos.is_valid() or not self.is_empty(check_pos):
+                return
+
+            # 从链尾开始依次向前移动一格
+            for idx in range(len(chain_positions) - 1, -1, -1):
+                from_pos = chain_positions[idx]
+                to_pos = Position(from_pos.row + dr, from_pos.col + dc)
+                piece_to_push = self.get_piece(from_pos)
+                self.set_piece(to_pos, piece_to_push)
+                self.set_piece(from_pos, EMPTY)
+                move.pushed_pieces.append((piece_to_push, from_pos, to_pos))
+
+            # 将起始棋子放入终点
+            self.set_piece(move.end, start_piece)
+            self.set_piece(move.start, EMPTY)
+
         self._update_piece_groups()
         self._update_empty_clusters()
 
@@ -376,7 +410,7 @@ class Board:
         # 仅返回“能直接带来消除”的移动，避免无效来回
         candidate_moves: List[Move] = []
 
-        # 传统方法：尝试每个棋子的每个可达空位
+        # 传统方法：尝试每个棋子的每个可达位置
         for piece, positions in self.piece_groups.items():
             for start_pos in positions:
                 for dr, dc in [(0, 1), (0, -1), (1, 0), (-1, 0)]:
@@ -386,9 +420,10 @@ class Board:
                         end_col = start_pos.col + dc * steps
                         end_pos = Position(end_row, end_col)
 
-                        if not end_pos.is_valid() or not self.is_empty(end_pos):
+                        if not end_pos.is_valid():
                             break
 
+                        # 对空位进行滑动尝试；对相邻或更远位置进行链式推挤尝试
                         temp_board = Board([row[:] for row in self.state])
                         temp_move = Move(start_pos, end_pos, piece)
                         if temp_board.execute_move(temp_move):
@@ -397,6 +432,7 @@ class Board:
                                 temp_move.score = self._evaluate_move_value(temp_move, temp_board)
                                 candidate_moves.append(temp_move)
 
+                        # 如果下一步依然可能（空位继续前进，或存在棋子但仍可能推挤），继续尝试
                         steps += 1
 
         if candidate_moves:
