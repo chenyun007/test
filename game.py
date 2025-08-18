@@ -355,15 +355,26 @@ class Board:
         # direct elimination
         score += 18.0
         # future pairs
-        score += len(after.find_elimination_pairs()) * 4.0
+        score += len(after.find_elimination_pairs()) * 5.0
         # mobility proxy removed to avoid nested heavy generation
         # center bias
         center_r, center_c = ROWS // 2, COLS // 2
         score -= (abs(mv.end.row - center_r) + abs(mv.end.col - center_c)) * 0.2
         # corridor
-        score += self._max_empty_run(after) * 0.06
+        before_run = self._max_empty_run(self)
+        after_run = self._max_empty_run(after)
+        score += after_run * 0.08
+        score += (after_run - before_run) * 0.2
         # pushing penalty
-        score -= len(mv.pushed_pieces) * 1.5
+        score -= len(mv.pushed_pieces) * 1.0
+        # type clearance bonus/oddness penalty
+        if mv.eliminated_pairs:
+            eliminated_type = mv.piece
+            remaining_of_type = sum(1 for r in range(ROWS) for c in range(COLS) if after.state[r][c] == eliminated_type)
+            if remaining_of_type == 0:
+                score += 10.0
+            elif remaining_of_type % 2 == 1:
+                score -= 4.0
         return score
 
     @staticmethod
@@ -446,6 +457,19 @@ class Board:
         score -= b.count_pieces() * 1.0
         score += len(b.find_elimination_pairs()) * 4.0
         score += Board._max_empty_run(b) * 0.08
+        # frequency-based terms: fewer singles/odds better
+        freq: Dict[str, int] = {}
+        for r in range(ROWS):
+            for c in range(COLS):
+                cell = b.state[r][c]
+                if cell != EMPTY:
+                    freq[cell] = freq.get(cell, 0) + 1
+        singles = sum(1 for v in freq.values() if v == 1)
+        odds = sum(1 for v in freq.values() if v % 2 == 1)
+        distinct = len(freq)
+        score -= singles * 0.6
+        score -= odds * 0.2
+        score -= distinct * 0.03
         return score
 
 
@@ -469,7 +493,11 @@ class ReversePlanner:
                     candidates.append(p)
 
         # 按距离与直线优先
-        candidates.sort(key=lambda p: (target.manhattan(p), 0 if (p.row == target.row or p.col == target.col) else 1))
+        candidates.sort(key=lambda p: (
+            target.manhattan(p),
+            0 if (p.row == target.row or p.col == target.col) else 1,
+            -self._line_clear_potential(target, p)
+        ))
 
         best_seq: List[Move] = []
         best_score = -10**9
@@ -519,7 +547,7 @@ class ReversePlanner:
             # 扩展：对 a、b 各自尝试小步移动，使其更接近同行/同列且在终点能产生一次消除
             for anchor, other in [(a, b), (b, a)]:
                 for dr, dc in [(0,1),(0,-1),(1,0),(-1,0)]:
-                    for step in range(1, 4):  # 小步探索
+                    for step in range(1, 5):  # 小步探索，略加深
                         end = Position(anchor.row + dr*step, anchor.col + dc*step)
                         if not end.is_valid():
                             break
@@ -535,6 +563,7 @@ class ReversePlanner:
                                     if h in visited:
                                         continue
                                     visited.add(h)
+                                    # 排序插入：优先通道增益更大的步
                                     agenda.append(path + [mv])
                                     expansions += 1
                                     if expansions >= self.node_budget:
@@ -544,6 +573,19 @@ class ReversePlanner:
                 if expansions >= self.node_budget:
                     break
         return []
+
+    def _line_clear_potential(self, a: Position, b: Position) -> int:
+        # 估计 a/b 两点行列方向的通道潜力（空格越多越好）
+        score = 0
+        if a.row == b.row:
+            r = a.row
+            left, right = sorted([a.col, b.col])
+            score += sum(1 for c in range(left + 1, right) if self.board.state[r][c] == EMPTY)
+        if a.col == b.col:
+            c = a.col
+            top, bottom = sorted([a.row, b.row])
+            score += sum(1 for r in range(top + 1, bottom) if self.board.state[r][c] == EMPTY)
+        return score
 
 
 def run() -> None:
