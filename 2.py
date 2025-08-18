@@ -974,7 +974,10 @@ def play_game():
 
 if __name__ == '__main__':
     try:
-        from game import run
+        from game import run, run_exhaustive
+        # 默认先跑启发式策略
         run()
+        # 再尝试穷举+回退搜索（带预算）以寻求进一步改进
+        run_exhaustive()
     except Exception:
         play_game()

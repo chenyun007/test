@@ -588,6 +588,88 @@ class ReversePlanner:
         return score
 
 
+class ExhaustiveDFS:
+    """基于回溯的穷举搜索（带节点/深度预算、回退与置换表）"""
+    def __init__(self, board: Board, max_depth: int = 80, node_budget: int = 20000,
+                 max_pairs_branch: int = 6, max_moves_branch: int = 16):
+        self.start_board = Board(board.state)
+        self.max_depth = max_depth
+        self.node_budget = node_budget
+        self.max_pairs_branch = max_pairs_branch
+        self.max_moves_branch = max_moves_branch
+
+        self.best_seq: List[Move] = []
+        self.best_remaining: int = board.count_pieces()
+        self.visited_best_remaining: Dict[str, int] = {}
+        self.nodes = 0
+
+    def solve(self) -> List[Move]:
+        self._dfs(self.start_board, [])
+        return self.best_seq
+
+    def _dfs(self, board: Board, path: List[Move]) -> None:
+        if self.nodes >= self.node_budget or len(path) >= self.max_depth:
+            return
+        self.nodes += 1
+
+        remaining = board.count_pieces()
+        if remaining < self.best_remaining:
+            self.best_remaining = remaining
+            self.best_seq = path[:]
+            if remaining == 0:
+                return
+
+        state_key = str(board.state)
+        prev_best = self.visited_best_remaining.get(state_key)
+        if prev_best is not None and prev_best <= remaining:
+            return
+        self.visited_best_remaining[state_key] = remaining
+
+        # Branch 1: eliminate any available pair (branch across pairs)
+        pairs = board.find_elimination_pairs()
+        if pairs:
+            # Heuristic ordering: favor pairs that open corridors and clear rare types
+            def pair_score(p: Tuple[Position, Position]) -> float:
+                a, b = p
+                kind = board.get(a)
+                freq = sum(1 for r in range(ROWS) for c in range(COLS) if board.state[r][c] == kind)
+                sc = 6.0 / max(freq, 1)
+                if a.row == b.row:
+                    sc += 0.6 * board._empty_between_in_row(a, b)
+                if a.col == b.col:
+                    sc += 0.6 * board._empty_between_in_col(a, b)
+                return sc
+            pairs.sort(key=pair_score, reverse=True)
+            if self.max_pairs_branch:
+                pairs = pairs[:self.max_pairs_branch]
+            for a, b in pairs:
+                next_board = Board(board.state)
+                mv = Move(a, a, next_board.get(a), [(a, b)], [])
+                if next_board.execute_move(mv):
+                    path.append(mv)
+                    self._dfs(next_board, path)
+                    path.pop()
+                    if self.best_remaining == 0:
+                        return
+            return
+
+        # Branch 2: try all immediate elimination moves
+        moves = board.generate_moves_one_step()
+        if not moves:
+            return
+        moves.sort(key=lambda m: m.score, reverse=True)
+        if self.max_moves_branch:
+            moves = moves[:self.max_moves_branch]
+        for mv in moves:
+            next_board = Board(board.state)
+            if next_board.execute_move(mv):
+                path.append(mv)
+                self._dfs(next_board, path)
+                path.pop()
+                if self.best_remaining == 0:
+                    return
+
+
 def run() -> None:
     board = Board()
     move_count = 0
@@ -682,6 +764,38 @@ def run() -> None:
     print("="*60)
     print(f"总共移动了 {move_count} 步")
     print(f"剩余 {remaining} 个棋子")
+    print("\n最终棋盘状态：")
+    board.print(title="最终棋盘状态")
+
+
+def run_exhaustive() -> None:
+    board = Board()
+    print("开始穷举 + 回退搜索 (带预算)...")
+    search = ExhaustiveDFS(board, max_depth=80, node_budget=20000, max_pairs_branch=6, max_moves_branch=16)
+    seq = search.solve()
+    print(f"搜索完成：节点={search.nodes}，最佳剩余={search.best_remaining}，步骤数={len(seq)}")
+    if not seq:
+        print("未找到改进路径。")
+        return
+    # 执行并展示
+    move_count = 0
+    for mv in seq:
+        move_count += 1
+        if mv.is_in_place:
+            print(f"\n第 {move_count} 步：")
+            a, b = mv.eliminated_pairs[0]
+            kind = board.get(a)
+            if board.execute_move(mv):
+                print(f"消除: {kind} 在 {a} 和 {b}")
+            else:
+                print("消除失败（回放）！")
+        else:
+            print(f"\n第 {move_count} 步：")
+            print(f"移动: {mv}")
+            if board.execute_move(mv):
+                print(f"移动并消除完成，剩余棋子数量：{board.count_pieces()}")
+            else:
+                print("移动失败（回放）！")
     print("\n最终棋盘状态：")
     board.print(title="最终棋盘状态")
 
