@@ -451,7 +451,7 @@ class Board:
 
     def _generate_immediate_elimination_moves(self) -> List[Move]:
         moves: List[Move] = []
-        simulation_budget = 4000  # 上限，防止爆算（适当放宽）
+        simulation_budget = 1500  # 上限，防止爆算（中等配额）
         for piece, positions in self.piece_groups.items():
             for start_pos in positions:
                 for dr, dc in [(0, 1), (0, -1), (1, 0), (-1, 0)]:
@@ -523,9 +523,9 @@ class Board:
         if not initial_candidates:
             return []
 
-        # 限制初始候选数量（适当放宽）
+        # 限制初始候选数量（中等配额）
         initial_candidates.sort(key=lambda m: m.score, reverse=True)
-        initial_candidates = initial_candidates[:40]
+        initial_candidates = initial_candidates[:30]
 
         beam = []
         visited = set()
@@ -550,9 +550,9 @@ class Board:
             level_visited = set()
             for score_so_far, seq, b in beam:
                 next_moves = b._generate_immediate_elimination_moves()
-                # 仅扩展前若干高分移动（适当放宽）
+                # 仅扩展前若干高分移动（中等配额）
                 next_moves.sort(key=lambda m: m.score, reverse=True)
-                next_moves = next_moves[:24]
+                next_moves = next_moves[:20]
                 for nm in next_moves:
                     nb = Board([row[:] for row in b.state])
                     if nb.execute_move(nm):
@@ -564,9 +564,9 @@ class Board:
                         new_score = score_so_far + nb._evaluate_board()
                         next_beam.append((new_score, new_seq, nb))
                         expansions += 1
-                        if expansions >= beam_width * 24:
+                        if expansions >= beam_width * 20:
                             break
-                if expansions >= beam_width * 24:
+                if expansions >= beam_width * 20:
                     break
             if not next_beam:
                 break
