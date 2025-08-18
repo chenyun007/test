@@ -326,7 +326,7 @@ class Board:
     def generate_moves_one_step(self) -> List[Move]:
         # Generate only moves that immediately cause an elimination
         results: List[Move] = []
-        budget = 2000
+        budget = 5000
         for r in range(ROWS):
             for c in range(COLS):
                 start = Position(r, c)
@@ -597,9 +597,9 @@ def run() -> None:
 
         # 先尝试反推：以每个棋子为锚点，找一条能促成对消的计划
         rp = ReversePlanner(board)
-        # 高质量配置
-        rp.max_depth = 12
-        rp.node_budget = 20000
+        # 更高质量配置
+        rp.max_depth = 16
+        rp.node_budget = 60000
         seq = []
         # 简化：随机抽样若干锚点尝试反推
         anchors: List[Position] = []
@@ -609,14 +609,14 @@ def run() -> None:
                 if board.get(p) != EMPTY:
                     anchors.append(p)
         random.shuffle(anchors)
-        for anchor in anchors[:30]:
+        for anchor in anchors[:50]:
             seq = rp.plan_for_piece(anchor)
             if seq:
                 break
 
         # 若反推无果，再退回束搜索
         if not seq:
-            seq = board.beam_search(depth=3, width=12)
+            seq = board.beam_search(depth=4, width=16)
         if not seq:
             print("没有找到有效的移动，游戏结束！")
             break
