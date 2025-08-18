@@ -590,10 +590,12 @@ class ReversePlanner:
 
 class ExhaustiveDFS:
     """基于回溯的穷举搜索（带节点/深度预算、回退与置换表）"""
-    def __init__(self, board: Board, max_depth: int = 80, node_budget: int = 20000,
-                 max_pairs_branch: int = 6, max_moves_branch: int = 16):
+    def __init__(self, board: Board, max_depth: Optional[int] = None, node_budget: Optional[int] = 20000,
+                 max_pairs_branch: Optional[int] = 6, max_moves_branch: Optional[int] = 16):
         self.start_board = Board(board.state)
-        self.max_depth = max_depth
+        # 默认最大深度为最多可消步数（每步去掉2个）
+        self.max_depth = max_depth if max_depth is not None else (board.count_pieces() // 2)
+        # None 表示不限制节点预算
         self.node_budget = node_budget
         self.max_pairs_branch = max_pairs_branch
         self.max_moves_branch = max_moves_branch
@@ -608,7 +610,7 @@ class ExhaustiveDFS:
         return self.best_seq
 
     def _dfs(self, board: Board, path: List[Move]) -> None:
-        if self.nodes >= self.node_budget or len(path) >= self.max_depth:
+        if (self.node_budget is not None and self.nodes >= self.node_budget) or len(path) >= self.max_depth:
             return
         self.nodes += 1
 
@@ -640,7 +642,7 @@ class ExhaustiveDFS:
                     sc += 0.6 * board._empty_between_in_col(a, b)
                 return sc
             pairs.sort(key=pair_score, reverse=True)
-            if self.max_pairs_branch:
+            if self.max_pairs_branch is not None:
                 pairs = pairs[:self.max_pairs_branch]
             for a, b in pairs:
                 next_board = Board(board.state)
@@ -658,7 +660,7 @@ class ExhaustiveDFS:
         if not moves:
             return
         moves.sort(key=lambda m: m.score, reverse=True)
-        if self.max_moves_branch:
+        if self.max_moves_branch is not None:
             moves = moves[:self.max_moves_branch]
         for mv in moves:
             next_board = Board(board.state)
@@ -796,6 +798,26 @@ def run_exhaustive() -> None:
                 print(f"移动并消除完成，剩余棋子数量：{board.count_pieces()}")
             else:
                 print("移动失败（回放）！")
+    print("\n最终棋盘状态：")
+    board.print(title="最终棋盘状态")
+
+
+def run_full_exhaustive() -> None:
+    board = Board()
+    print("开始完全穷举 + 回退（无节点上限，可能耗时极长）...")
+    # 不设节点预算/分支裁剪，深度设为最大理论可消次数
+    search = ExhaustiveDFS(board, max_depth=None, node_budget=None, max_pairs_branch=None, max_moves_branch=None)
+    seq = search.solve()
+    print(f"穷举完成：节点={search.nodes}，最佳剩余={search.best_remaining}，步骤数={len(seq)}")
+    move_count = 0
+    for mv in seq:
+        move_count += 1
+        if mv.is_in_place:
+            a, b = mv.eliminated_pairs[0]
+            print(f"\n第 {move_count} 步：消除 {board.get(a)} 在 {a} 和 {b}")
+        else:
+            print(f"\n第 {move_count} 步：移动 {mv}")
+        board.execute_move(mv)
     print("\n最终棋盘状态：")
     board.print(title="最终棋盘状态")
 

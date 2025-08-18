@@ -974,10 +974,14 @@ def play_game():
 
 if __name__ == '__main__':
     try:
-        from game import run, run_exhaustive
+        import os
+        from game import run, run_exhaustive, run_full_exhaustive
         # 默认先跑启发式策略
         run()
         # 再尝试穷举+回退搜索（带预算）以寻求进一步改进
         run_exhaustive()
+        # 如需完全穷举，设置环境变量 FULL_EXHAUSTIVE=1
+        if os.environ.get('FULL_EXHAUSTIVE') == '1':
+            run_full_exhaustive()
     except Exception:
         play_game()
