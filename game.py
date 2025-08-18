@@ -239,6 +239,15 @@ class Board:
     def execute_move(self, move: Move) -> bool:
         # If in-place: eliminate one available pair
         if move.is_in_place:
+            # 优先执行指定对消（用于规划器）
+            if move.eliminated_pairs:
+                a, b = move.eliminated_pairs[0]
+                if self.can_eliminate(a, b):
+                    self.eliminate_specific_pair(a, b)
+                    return True
+                else:
+                    return False
+            # 否则选择最佳对
             pairs = self.find_elimination_pairs()
             if not pairs:
                 return False
@@ -273,6 +282,13 @@ class Board:
             move.eliminated_pairs = [eliminated]
         move.pushed_pieces = pushed
         return True
+
+    def eliminate_specific_pair(self, a: Position, b: Position) -> bool:
+        if self.can_eliminate(a, b):
+            self.set(a, EMPTY)
+            self.set(b, EMPTY)
+            return True
+        return False
 
     # ---------- Elimination helpers ----------
     def _empty_between_in_row(self, a: Position, b: Position) -> int:
@@ -433,6 +449,103 @@ class Board:
         return score
 
 
+class ReversePlanner:
+    """目标导向回归规划器：选定目标棋子，回推前置条件，生成可执行方案"""
+    def __init__(self, board: Board):
+        self.board = board
+        self.max_depth = 8
+        self.node_budget = 5000
+
+    def plan_for_piece(self, target: Position) -> List[Move]:
+        piece = self.board.get(target)
+        if piece == EMPTY:
+            return []
+        # 找到所有同类候选
+        candidates: List[Position] = []
+        for r in range(ROWS):
+            for c in range(COLS):
+                p = Position(r, c)
+                if p != target and self.board.get(p) == piece:
+                    candidates.append(p)
+
+        # 按距离与直线优先
+        candidates.sort(key=lambda p: (target.manhattan(p), 0 if (p.row == target.row or p.col == target.col) else 1))
+
+        best_seq: List[Move] = []
+        best_score = -10**9
+
+        for mate in candidates[:12]:
+            seq = self._search_to_eliminate_pair(target, mate)
+            if seq:
+                tmp = Board(self.board.state)
+                ok = True
+                for mv in seq:
+                    if not tmp.execute_move(mv):
+                        ok = False
+                        break
+                if not ok:
+                    continue
+                score = -tmp.count_pieces() + len(tmp.find_elimination_pairs()) * 2
+                if score > best_score:
+                    best_score = score
+                    best_seq = seq
+
+        return best_seq
+
+    def _search_to_eliminate_pair(self, a: Position, b: Position) -> List[Move]:
+        # 若已可消，直接原地消
+        if self.board.can_eliminate(a, b):
+            return [Move(a, a, self.board.get(a), [(a, b)], [])]
+
+        # 简化版回归：尝试将 a 或 b 沿行/列移动若干步，使其与对方同直线且间隔可被清空
+        agenda: List[List[Move]] = [[]]
+        visited = set()
+        expansions = 0
+
+        while agenda and expansions < self.node_budget and len(agenda[0]) <= self.max_depth:
+            path = agenda.pop(0)
+            cur_board = Board(self.board.state)
+            ok = True
+            for mv in path:
+                if not cur_board.execute_move(mv):
+                    ok = False
+                    break
+            if not ok:
+                continue
+
+            if cur_board.can_eliminate(a, b):
+                return path + [Move(a, a, cur_board.get(a), [(a, b)], [])]
+
+            # 扩展：对 a、b 各自尝试小步移动，使其更接近同行/同列且在终点能产生一次消除
+            for anchor, other in [(a, b), (b, a)]:
+                for dr, dc in [(0,1),(0,-1),(1,0),(-1,0)]:
+                    for step in range(1, 4):  # 小步探索
+                        end = Position(anchor.row + dr*step, anchor.col + dc*step)
+                        if not end.is_valid():
+                            break
+                        mv = Move(anchor, end, cur_board.get(anchor), [], [])
+                        test_board = Board(cur_board.state)
+                        if test_board.execute_move(mv):
+                            # 要求新位置与另一个点在一条直线，且能立刻消一次
+                            if end.row == other.row or end.col == other.col:
+                                # 参与一次消除即可（反推满足子目标）
+                                new_pairs = test_board.find_elimination_pairs()
+                                if new_pairs:
+                                    h = str(test_board.state)
+                                    if h in visited:
+                                        continue
+                                    visited.add(h)
+                                    agenda.append(path + [mv])
+                                    expansions += 1
+                                    if expansions >= self.node_budget:
+                                        break
+                    if expansions >= self.node_budget:
+                        break
+                if expansions >= self.node_budget:
+                    break
+        return []
+
+
 def run() -> None:
     board = Board()
     move_count = 0
@@ -482,8 +595,25 @@ def run() -> None:
             print("\n" + "="*60 + "\n")
             continue
 
-        # Search for a move sequence; execute the first move of best sequence
-        seq = board.beam_search(depth=3, width=10)
+        # 先尝试反推：以每个棋子为锚点，找一条能促成对消的计划
+        rp = ReversePlanner(board)
+        seq = []
+        # 简化：随机抽样若干锚点尝试反推
+        anchors: List[Position] = []
+        for r in range(ROWS):
+            for c in range(COLS):
+                p = Position(r, c)
+                if board.get(p) != EMPTY:
+                    anchors.append(p)
+        random.shuffle(anchors)
+        for anchor in anchors[:20]:
+            seq = rp.plan_for_piece(anchor)
+            if seq:
+                break
+
+        # 若反推无果，再退回束搜索
+        if not seq:
+            seq = board.beam_search(depth=2, width=8)
         if not seq:
             print("没有找到有效的移动，游戏结束！")
             break
