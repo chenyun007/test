@@ -1,6 +1,16 @@
 import random
 from copy import deepcopy
-from colorama import init, Fore, Back, Style
+try:
+    from colorama import init, Fore, Back, Style
+except Exception:  # Fallback if colorama is not installed
+    def init():
+        return None
+    class _NoColor:
+        def __getattr__(self, name):
+            return ""
+    Fore = _NoColor()
+    Back = _NoColor()
+    Style = _NoColor()
 from typing import List, Tuple, Optional, Dict, Set
 from dataclasses import dataclass
 
@@ -309,10 +319,12 @@ class Board:
                     self._push_piece_chain(neighbor_pos, dr, dc, move)
 
     def _is_in_move_direction(self, pos: Position, start_pos: Position, dr: int, dc: int) -> bool:
+        # 当水平移动时，推动应作用于与起点同列的相邻棋子（上下方向）
         if dr == 0:  # 水平移动
-            return pos.row == start_pos.row
-        elif dc == 0:  # 垂直移动
             return pos.col == start_pos.col
+        # 当垂直移动时，推动应作用于与起点同行的相邻棋子（左右方向）
+        elif dc == 0:  # 垂直移动
+            return pos.row == start_pos.row
         return False
 
     def _push_piece_chain(self, start_pos: Position, dr: int, dc: int, move: Move):
