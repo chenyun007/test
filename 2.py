@@ -393,12 +393,30 @@ class Board:
             self.set_piece(from_pos, EMPTY)
 
     def eliminate_pairs(self, pairs: List[Tuple[Position, Position]]) -> int:
+        # 优先选择对后续更有利的那一对（如同类多/打通通道）
+        if not pairs:
+            return 0
+
+        def pair_value(p: Tuple[Position, Position]) -> float:
+            p1, p2 = p
+            piece = self.get_piece(p1)
+            # 少量种类优先清除（避免残子）
+            freq = sum(1 for r in range(ROWS) for c in range(COLS) if self.state[r][c] == piece)
+            value = 5.0 / max(freq, 1)
+            # 行列通道潜力
+            if p1.row == p2.row:
+                value += 0.5 * (self._empty_between_in_row(p1, p2))
+            if p1.col == p2.col:
+                value += 0.5 * (self._empty_between_in_col(p1, p2))
+            return value
+
+        best_pair = max(pairs, key=pair_value)
+        pos1, pos2 = best_pair
         eliminated_count = 0
-        for pos1, pos2 in pairs:
-            if self.can_eliminate(pos1, pos2):
-                self.set_piece(pos1, EMPTY)
-                self.set_piece(pos2, EMPTY)
-                eliminated_count += 2
+        if self.can_eliminate(pos1, pos2):
+            self.set_piece(pos1, EMPTY)
+            self.set_piece(pos2, EMPTY)
+            eliminated_count += 2
 
         if eliminated_count > 0:
             self._update_piece_groups()
@@ -406,9 +424,21 @@ class Board:
 
         return eliminated_count
 
+    def _empty_between_in_row(self, p1: Position, p2: Position) -> int:
+        if p1.row != p2.row:
+            return 0
+        left, right = sorted([p1.col, p2.col])
+        return sum(1 for c in range(left + 1, right) if self.state[p1.row][c] == EMPTY)
+
+    def _empty_between_in_col(self, p1: Position, p2: Position) -> int:
+        if p1.col != p2.col:
+            return 0
+        top, bottom = sorted([p1.row, p2.row])
+        return sum(1 for r in range(top + 1, bottom) if self.state[r][p1.col] == EMPTY)
+
     def find_valid_moves(self) -> List[Move]:
         # 优先使用束搜索，寻找对后续更有利的立即消除型移动
-        beam_moves = self._beam_search_moves(max_depth=2, beam_width=8)
+        beam_moves = self._beam_search_moves(max_depth=3, beam_width=10)
         if beam_moves:
             return [beam_moves[0]]
 
@@ -443,18 +473,45 @@ class Board:
         return moves
 
     def _evaluate_board(self) -> float:
-        # 局面评分：更少的棋子、更靠中心、更多潜在可消对
+        # 局面评分：更少的棋子、更多潜在可消、更高机动性、更长空走廊
         score = 0.0
-        score -= self.count_pieces() * 1.0
+        remaining = self.count_pieces()
+        score -= remaining * 1.0
         pairs = self.find_elimination_pairs()
-        score += len(pairs) * 4.0
-        # 中心性奖励：统计所有棋子到中心的负距离
+        score += len(pairs) * 4.5
+        mobility = len(self._generate_immediate_elimination_moves())
+        score += mobility * 1.0
+        score += self._max_empty_run() * 0.1
+        # 中心性轻微约束
         center_row, center_col = ROWS // 2, COLS // 2
         for r in range(ROWS):
             for c in range(COLS):
                 if self.state[r][c] != EMPTY:
-                    score -= (abs(r - center_row) + abs(c - center_col)) * 0.05
+                    score -= (abs(r - center_row) + abs(c - center_col)) * 0.03
         return score
+
+    def _max_empty_run(self) -> int:
+        # 统计行列中最长连续空位长度，用于鼓励打开走廊
+        best = 0
+        # 行
+        for r in range(ROWS):
+            cur = 0
+            for c in range(COLS):
+                if self.state[r][c] == EMPTY:
+                    cur += 1
+                    best = max(best, cur)
+                else:
+                    cur = 0
+        # 列
+        for c in range(COLS):
+            cur = 0
+            for r in range(ROWS):
+                if self.state[r][c] == EMPTY:
+                    cur += 1
+                    best = max(best, cur)
+                else:
+                    cur = 0
+        return best
 
     def _beam_search_moves(self, max_depth: int = 2, beam_width: int = 8) -> List[Move]:
         # 节点为(累计评分, move序列, 棋盘)
@@ -537,23 +594,35 @@ class Board:
     def _evaluate_move_value(self, move: Move, temp_board: 'Board') -> float:
         score = 0.0
         score += 5.0
-        
+
+        # 直接消除收益
         if move.eliminated_pairs:
-            score += len(move.eliminated_pairs) * 15.0
-        
+            score += len(move.eliminated_pairs) * 18.0
+            # 稀有类型加成（以当前局面频次衡量）
+            pos1, pos2 = move.eliminated_pairs[0]
+            piece_kind = self.get_piece(move.start) if not move.is_in_place else self.get_piece(pos1)
+            freq = sum(1 for r in range(ROWS) for c in range(COLS) if self.state[r][c] == piece_kind)
+            if freq > 0:
+                score += 6.0 / freq
+
+        # 距离与推动成本
         if not move.is_in_place:
             distance = move.start.distance_to(move.end)
-            score -= distance * 1.0
-        
-        score -= len(move.pushed_pieces) * 3.0
-        
+            score -= distance * 0.8
+        score -= len(move.pushed_pieces) * 2.5
+
+        # 新局面可消潜力与机动性
         new_pairs = temp_board.find_elimination_pairs()
-        score += len(new_pairs) * 3.0
-        
+        score += len(new_pairs) * 4.0
+        mobility = len(temp_board._generate_immediate_elimination_moves())
+        score += mobility * 1.2
+
+        # 中心性与空走廊奖励
         center_row, center_col = ROWS // 2, COLS // 2
         center_distance = abs(move.end.row - center_row) + abs(move.end.col - center_col)
-        score -= center_distance * 0.5
-        
+        score -= center_distance * 0.4
+        score += temp_board._max_empty_run() * 0.08
+
         return score
 
     def _find_simple_moves(self) -> List[Move]:
