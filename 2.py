@@ -973,4 +973,8 @@ def play_game():
     board.print_board(title="最终棋盘状态")
 
 if __name__ == '__main__':
-    play_game()
+    try:
+        from game import run
+        run()
+    except Exception:
+        play_game()
