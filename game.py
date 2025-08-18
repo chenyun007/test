@@ -242,8 +242,11 @@ class Board:
             pairs = self.find_elimination_pairs()
             if not pairs:
                 return False
-            self._eliminate_best_pair(pairs)
-            return True
+            eliminated = self._eliminate_best_pair(pairs)
+            if eliminated is not None:
+                move.eliminated_pairs = [eliminated]
+                return True
+            return False
 
         start, end, piece = move.start, move.end, move.piece
         snapshot = [row[:] for row in self.state]
@@ -265,8 +268,9 @@ class Board:
             return False
 
         # perform elimination
-        self._eliminate_best_pair(valid_pairs)
-        move.eliminated_pairs = [valid_pairs[0]]
+        eliminated = self._eliminate_best_pair(valid_pairs)
+        if eliminated is not None:
+            move.eliminated_pairs = [eliminated]
         move.pushed_pieces = pushed
         return True
 
@@ -283,7 +287,7 @@ class Board:
         top, bottom = sorted([a.row, b.row])
         return sum(1 for r in range(top + 1, bottom) if self.state[r][a.col] == EMPTY)
 
-    def _eliminate_best_pair(self, pairs: List[Tuple[Position, Position]]) -> None:
+    def _eliminate_best_pair(self, pairs: List[Tuple[Position, Position]]) -> Optional[Tuple[Position, Position]]:
         def score_pair(p: Tuple[Position, Position]) -> float:
             a, b = p
             kind = self.get(a)
@@ -300,12 +304,13 @@ class Board:
         if self.can_eliminate(a, b):
             self.set(a, EMPTY)
             self.set(b, EMPTY)
-
+            return (a, b)
+        return None
     # ---------- Move generation and search ----------
     def generate_moves_one_step(self) -> List[Move]:
         # Generate only moves that immediately cause an elimination
         results: List[Move] = []
-        budget = 2000
+        budget = 600
         for r in range(ROWS):
             for c in range(COLS):
                 start = Position(r, c)
@@ -335,8 +340,7 @@ class Board:
         score += 18.0
         # future pairs
         score += len(after.find_elimination_pairs()) * 4.0
-        # mobility proxy
-        score += min(20, len(after.generate_moves_one_step())) * 0.6
+        # mobility proxy removed to avoid nested heavy generation
         # center bias
         center_r, center_c = ROWS // 2, COLS // 2
         score -= (abs(mv.end.row - center_r) + abs(mv.end.col - center_c)) * 0.2
@@ -367,12 +371,12 @@ class Board:
                     cur = 0
         return best
 
-    def beam_search(self, depth: int = 3, width: int = 10) -> List[Move]:
+    def beam_search(self, depth: int = 2, width: int = 8) -> List[Move]:
         first_moves = self.generate_moves_one_step()
         if not first_moves:
             return []
         first_moves.sort(key=lambda m: m.score, reverse=True)
-        first_moves = first_moves[:min(len(first_moves), 30)]
+        first_moves = first_moves[:min(len(first_moves), 20)]
 
         beam: List[Tuple[float, List[Move], Board]] = []
         seen = set()
@@ -396,7 +400,7 @@ class Board:
             for score_so_far, seq, b in beam:
                 cand = b.generate_moves_one_step()
                 cand.sort(key=lambda m: m.score, reverse=True)
-                cand = cand[:min(len(cand), 20)]
+                cand = cand[:min(len(cand), 12)]
                 for nm in cand:
                     nb = Board(b.state)
                     if nb.execute_move(nm):
@@ -408,9 +412,9 @@ class Board:
                         new_score = score_so_far + self._eval_board(nb)
                         next_beam.append((new_score, new_seq, nb))
                         expansions += 1
-                        if expansions >= width * 20:
+                        if expansions >= width * 12:
                             break
-                if expansions >= width * 20:
+                if expansions >= width * 12:
                     break
             if not next_beam:
                 break
@@ -458,10 +462,20 @@ def run() -> None:
         if pairs:
             move_count += 1
             print(f"\n第 {move_count} 步：")
-            a, b = pairs[0]
-            mv = Move(a, a, board.get(a), [], [])
+            # 选择最优对消进行展示（不永久修改棋盘）
+            snapshot = [row[:] for row in board.state]
+            eliminated_preview = board._eliminate_best_pair(pairs.copy())
+            if eliminated_preview is None:
+                print("消除失败！")
+                print("\n" + "="*60 + "\n")
+                continue
+            # 回滚到预览前的快照
+            board.state = snapshot
+            a, b = eliminated_preview
+            kind = board.get(a)
+            mv = Move(a, a, kind, [], [])
             if board.execute_move(mv):
-                print(f"消除: {board.get(b)} 在 {a} 和 {b}")
+                print(f"消除: {kind} 在 {a} 和 {b}")
                 print(f"\n剩余棋子数量：{board.count_pieces()}")
             else:
                 print("消除失败！")
