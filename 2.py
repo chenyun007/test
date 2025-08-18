@@ -451,6 +451,7 @@ class Board:
 
     def _generate_immediate_elimination_moves(self) -> List[Move]:
         moves: List[Move] = []
+        simulation_budget = 4000  # 上限，防止爆算（适当放宽）
         for piece, positions in self.piece_groups.items():
             for start_pos in positions:
                 for dr, dc in [(0, 1), (0, -1), (1, 0), (-1, 0)]:
@@ -469,6 +470,9 @@ class Board:
                             if temp_move.eliminated_pairs:
                                 temp_move.score = self._evaluate_move_value(temp_move, temp_board)
                                 moves.append(temp_move)
+                        simulation_budget -= 1
+                        if simulation_budget <= 0:
+                            return moves
                         steps += 1
         return moves
 
@@ -519,10 +523,19 @@ class Board:
         if not initial_candidates:
             return []
 
+        # 限制初始候选数量（适当放宽）
+        initial_candidates.sort(key=lambda m: m.score, reverse=True)
+        initial_candidates = initial_candidates[:40]
+
         beam = []
+        visited = set()
         for mv in initial_candidates:
             temp_board = Board([row[:] for row in self.state])
             if temp_board.execute_move(mv):
+                state_hash = str(temp_board.state)
+                if state_hash in visited:
+                    continue
+                visited.add(state_hash)
                 beam.append((temp_board._evaluate_board(), [mv], temp_board))
 
         beam.sort(key=lambda x: x[0], reverse=True)
@@ -533,14 +546,28 @@ class Board:
         depth = 1
         while depth < max_depth and beam:
             next_beam = []
+            expansions = 0
+            level_visited = set()
             for score_so_far, seq, b in beam:
                 next_moves = b._generate_immediate_elimination_moves()
+                # 仅扩展前若干高分移动（适当放宽）
+                next_moves.sort(key=lambda m: m.score, reverse=True)
+                next_moves = next_moves[:24]
                 for nm in next_moves:
                     nb = Board([row[:] for row in b.state])
                     if nb.execute_move(nm):
+                        state_hash = str(nb.state)
+                        if state_hash in level_visited:
+                            continue
+                        level_visited.add(state_hash)
                         new_seq = seq + [nm]
                         new_score = score_so_far + nb._evaluate_board()
                         next_beam.append((new_score, new_seq, nb))
+                        expansions += 1
+                        if expansions >= beam_width * 24:
+                            break
+                if expansions >= beam_width * 24:
+                    break
             if not next_beam:
                 break
             next_beam.sort(key=lambda x: x[0], reverse=True)
