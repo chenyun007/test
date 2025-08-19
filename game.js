@@ -159,17 +159,30 @@ function computeValidMoveTargets(from) {
     const piece = board[from.row][from.col];
     if (!piece || piece === EMPTY) return;
 
+    function wouldCreateElimination(toRow, toCol) {
+        const prevPieceAtTo = board[toRow][toCol];
+        const fromPiece = board[from.row][from.col];
+        // move temporarily
+        board[from.row][from.col] = EMPTY;
+        board[toRow][toCol] = fromPiece;
+        const options = afterMoveEliminationOptions({ row: toRow, col: toCol });
+        // rollback
+        board[toRow][toCol] = prevPieceAtTo;
+        board[from.row][from.col] = fromPiece;
+        return options.length > 0;
+    }
+
     // Same row
     for (let c = 0; c < COLS; c++) {
         if (c === from.col) continue;
-        if (isEmpty(from.row, c) && canConnect(from.row, from.col, from.row, c)) {
+        if (isEmpty(from.row, c) && canConnect(from.row, from.col, from.row, c) && wouldCreateElimination(from.row, c)) {
             validMoveTargets.add(`${from.row},${c}`);
         }
     }
     // Same col
     for (let r = 0; r < ROWS; r++) {
         if (r === from.row) continue;
-        if (isEmpty(r, from.col) && canConnect(from.row, from.col, r, from.col)) {
+        if (isEmpty(r, from.col) && canConnect(from.row, from.col, r, from.col) && wouldCreateElimination(r, from.col)) {
             validMoveTargets.add(`${r},${from.col}`);
         }
     }
