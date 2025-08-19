@@ -1,0 +1,143 @@
+:root {
+    --bg: #0f1115;
+    --panel: #171a21;
+    --text: #e5e7eb;
+    --muted: #9ca3af;
+    --primary: #60a5fa;
+    --ok: #34d399;
+    --warn: #f59e0b;
+    --danger: #ef4444;
+    --grid-gap: 6px;
+    --cell-size: 48px;
+}
+
+* { box-sizing: border-box; }
+
+body {
+    margin: 0;
+    font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, "Apple Color Emoji", "Segoe UI Emoji";
+    background: radial-gradient(1200px 600px at 20% 0%, #10131a, #0b0d12);
+    color: var(--text);
+}
+
+.app {
+    max-width: 1100px;
+    margin: 24px auto;
+    padding: 0 16px;
+}
+
+.app__header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    margin-bottom: 16px;
+}
+
+.app__header h1 {
+    font-size: 20px;
+    margin: 0;
+}
+
+.stats {
+    display: flex;
+    gap: 16px;
+    color: var(--muted);
+}
+
+.controls { display: flex; gap: 8px; }
+.controls button {
+    background: var(--panel);
+    color: var(--text);
+    border: 1px solid #262b36;
+    padding: 8px 12px;
+    border-radius: 8px;
+    cursor: pointer;
+}
+.controls button:hover { border-color: var(--primary); }
+
+.app__main {
+    background: linear-gradient(180deg, #0e121a, #0d1016);
+    border: 1px solid #1f2430;
+    border-radius: 12px;
+    padding: 16px;
+}
+
+.message {
+    min-height: 24px;
+    margin-bottom: 8px;
+    color: var(--muted);
+}
+
+.board {
+    display: grid;
+    grid-template-columns: repeat(10, var(--cell-size));
+    grid-template-rows: repeat(14, var(--cell-size));
+    gap: var(--grid-gap);
+    padding: var(--grid-gap);
+    background: #0b0f16;
+    border-radius: 12px;
+    border: 1px solid #1b2130;
+    width: calc(10 * var(--cell-size) + 2 * var(--grid-gap) + 9 * var(--grid-gap));
+    touch-action: none;
+}
+
+.cell {
+    width: var(--cell-size);
+    height: var(--cell-size);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 10px;
+    user-select: none;
+    transition: transform 120ms ease, box-shadow 120ms ease, background 120ms ease;
+    position: relative;
+    font-weight: 700;
+    letter-spacing: 0.3px;
+}
+
+.cell--empty {
+    background: #0f1420;
+    border: 1px dashed #22283a;
+    color: #2b3247;
+}
+
+.cell--piece {
+    background: #121829;
+    border: 1px solid #21283b;
+    box-shadow: inset 0 1px 0 rgba(255,255,255,0.02), 0 1px 2px rgba(0,0,0,0.25);
+}
+
+.cell__code { font-size: 14px; }
+.cell__sub { font-size: 11px; opacity: 0.8; margin-left: 4px; }
+
+.cell[data-letter="A"] { background: linear-gradient(180deg, #11263a, #0e1f31); border-color: #1c3954; color: #cde9ff; }
+.cell[data-letter="B"] { background: linear-gradient(180deg, #2a223e, #211a33); border-color: #3a2f58; color: #eadcff; }
+.cell[data-letter="C"] { background: linear-gradient(180deg, #1a2f2f, #142525); border-color: #254646; color: #c8ffee; }
+.cell[data-letter="D"] { background: linear-gradient(180deg, #3a231e, #2e1b17); border-color: #5a352d; color: #ffd9cc; }
+.cell[data-letter="E"] { background: linear-gradient(180deg, #2c2f1a, #232514); border-color: #474b25; color: #f6ffcc; }
+.cell[data-letter="F"] { background: linear-gradient(180deg, #1e2f3a, #182631); border-color: #2d4a5a; color: #ccf2ff; }
+.cell[data-letter="G"] { background: linear-gradient(180deg, #1e2a1e, #182218); border-color: #2d462d; color: #d9ffd9; }
+.cell[data-letter="H"] { background: linear-gradient(180deg, #2a1e2a, #221822); border-color: #462d46; color: #ffd9ff; }
+.cell[data-letter="I"] { background: linear-gradient(180deg, #2a2a1e, #222218); border-color: #46462d; color: #fff0cc; }
+.cell[data-letter="J"] { background: linear-gradient(180deg, #1e263a, #181f31); border-color: #2d3a5a; color: #cdddff; }
+
+.cell--selected {
+    outline: 2px solid var(--primary);
+    transform: translateY(-2px);
+}
+
+.cell--valid-move { box-shadow: 0 0 0 2px rgba(96,165,250,0.35) inset; }
+.cell--candidate { box-shadow: 0 0 0 2px rgba(52,211,153,0.4) inset; }
+.cell--bad { box-shadow: 0 0 0 2px rgba(239,68,68,0.45) inset; }
+
+.cell--hover-target { outline: 2px dashed rgba(96,165,250,0.5); }
+
+.legend {
+    margin-top: 12px;
+    color: var(--muted);
+    font-size: 13px;
+}
+
+.app__footer { margin-top: 14px; color: var(--muted); font-size: 13px; }
+

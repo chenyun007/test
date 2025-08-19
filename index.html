@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>消除类游戏 - HTML版</title>
+    <link rel="stylesheet" href="./style.css" />
+</head>
+<body>
+    <div class="app">
+        <header class="app__header">
+            <h1>消除类游戏</h1>
+            <div class="stats">
+                <div>步数：<span id="moveCount">0</span></div>
+                <div>剩余棋子：<span id="pieceCount">0</span></div>
+            </div>
+            <div class="controls">
+                <button id="resetBtn">重置</button>
+                <button id="showPairsBtn">提示消除对</button>
+            </div>
+        </header>
+
+        <main class="app__main">
+            <div id="message" class="message" role="status" aria-live="polite"></div>
+            <div id="board" class="board" aria-label="棋盘" tabindex="0"></div>
+        </main>
+
+        <footer class="app__footer">
+            <p>规则简述：
+                - 只能沿行或列移动到空格。
+                - 移动后，若可与相同棋子且中间无阻挡的同行/同列配对，必须立即选择并消除该配对。
+                - 也可直接点击两个可直连的相同棋子进行原地消除。
+            </p>
+        </footer>
+    </div>
+
+    <script src="./game.js"></script>
+</body>
+</html>
+
