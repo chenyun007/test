@@ -79,6 +79,8 @@ function inBounds(row, col) {
 }
 
 function canConnect(r1, c1, r2, c2) {
+    // must be two distinct cells
+    if (r1 === r2 && c1 === c2) return false;
     if (r1 === r2) {
         const start = Math.min(c1, c2) + 1;
         const end = Math.max(c1, c2);
@@ -222,6 +224,7 @@ function afterMoveEliminationOptions(at) {
 
 function doEliminate(pos1, pos2) {
     if (!inBounds(pos1.row, pos1.col) || !inBounds(pos2.row, pos2.col)) return false;
+    if (pos1.row === pos2.row && pos1.col === pos2.col) return false;
     const piece1 = board[pos1.row][pos1.col];
     const piece2 = board[pos2.row][pos2.col];
     if (piece1 === EMPTY || piece1 !== piece2) return false;
