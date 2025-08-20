@@ -368,9 +368,7 @@ function onPointerDown(e, r, c) {
         computeValidMoveTargets(selected);
         computeEliminationCandidates(selected);
     }
-    if (e.currentTarget && e.currentTarget.setPointerCapture) {
-        e.currentTarget.setPointerCapture(e.pointerId);
-    }
+    // 不使用 pointer capture，避免点击第二个格子时事件被原格子捕获
 }
 
 function onPointerEnter(r, c) {
