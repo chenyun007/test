@@ -38,6 +38,7 @@ const elPieceCount = document.getElementById('pieceCount');
 const elMessage = document.getElementById('message');
 const elReset = document.getElementById('resetBtn');
 const elShowPairs = document.getElementById('showPairsBtn');
+const elCancel = document.getElementById('cancelBtn');
 
 function cloneBoard(src) { return src.map(row => row.slice()); }
 
@@ -93,6 +94,7 @@ function render(){
 }
 
 function clearHighlights(){ validMoveTargets.clear(); eliminationCandidates.clear(); }
+function cancelSelection(){ selected=null; awaitingEliminationFrom=null; clearHighlights(); hoverCellKey=null; dragging=null; setMessage(''); render(); dbg('cancelSelection'); }
 
 function computeValidMoveTargets(from){
   validMoveTargets.clear(); const piece=board[from.row][from.col]; if(!piece||piece===EMPTY)return;
@@ -210,5 +212,10 @@ function showAnyPairs(){ clearHighlights(); for(let r1=0;r1<ROWS;r1++){ for(let 
 
 elReset.addEventListener('click', resetGame);
 elShowPairs.addEventListener('click', showAnyPairs);
+elCancel.addEventListener('click', cancelSelection);
+
+// ESC 取消、右键取消
+window.addEventListener('keydown', (e)=>{ if(e.key==='Escape'){ cancelSelection(); }});
+elBoard.addEventListener('contextmenu', (e)=>{ e.preventDefault(); cancelSelection(); });
 
 resetGame();

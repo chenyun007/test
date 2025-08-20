@@ -55,6 +55,8 @@ body {
     cursor: pointer;
 }
 .controls button:hover { border-color: var(--primary); }
+.controls #cancelBtn { border-color: #3a3f50; }
+.controls #cancelBtn:hover { border-color: var(--danger); }
 
 .app__main {
     background: linear-gradient(180deg, #0e121a, #0d1016);
