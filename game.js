@@ -155,9 +155,56 @@ function onCellClick(r,c){
   setMessage('该位置不是有效的移动目标。只能沿行/列移动到蓝色高亮的空格。','error');
 }
 
-function onPointerDown(e,r,c){ if(awaitingEliminationFrom) return; const piece=board[r][c]; if(piece===EMPTY) return; dragging={from:{row:r,col:c}, current:{row:r,col:c}}; if(!selected){ selected={row:r,col:c}; computeValidMoveTargets(selected); computeEliminationCandidates(selected); } dbg('pointerdown',{r,c,piece}); }
+function onPointerDown(e,r,c){
+  if(awaitingEliminationFrom) return;
+  const piece=board[r][c];
+  if(piece===EMPTY) return;
+  // If there is already a selection, start dragging from the selected cell
+  // so releasing on a candidate can eliminate using the existing selection
+  if(selected){
+    dragging={from:{row:selected.row,col:selected.col}, current:{row:selected.row,col:selected.col}};
+  } else {
+    selected={row:r,col:c};
+    computeValidMoveTargets(selected);
+    computeEliminationCandidates(selected);
+    dragging={from:{row:r,col:c}, current:{row:r,col:c}};
+  }
+  dbg('pointerdown',{r,c,piece, selected});
+}
 function onPointerEnter(r,c){ if(!dragging) return; hoverCellKey=`${r},${c}`; render(); dbg('pointerenter',{r,c}); }
-function onPointerUp(r,c){ if(!dragging) return; const from=dragging.from; dragging=null; let dropRow=r, dropCol=c; if(hoverCellKey){ const [hr,hc]=hoverCellKey.split(',').map(Number); dropRow=hr; dropCol=hc; } const key=`${dropRow},${dropCol}`; hoverCellKey=null; const piece=board[dropRow][dropCol]; const fromPiece=board[from.row][from.col]; if(piece!==EMPTY && piece===fromPiece && canConnect(from.row,from.col,dropRow,dropCol)){ dbg('pointerup eliminate',{from,to:{row:dropRow,col:dropCol}}); doEliminate(from,{row:dropRow,col:dropCol}); return; } if(isEmpty(dropRow,dropCol) && validMoveTargets.has(key)){ dbg('pointerup move',{from,to:{row:dropRow,col:dropCol}}); tryMove(from,{row:dropRow,col:dropCol}); return; } render(); dbg('pointerup noop',{from,dropRow,dropCol}); }
+function onPointerUp(r,c){
+  if(!dragging) return;
+  const dragFrom=dragging.from;
+  dragging=null;
+  let dropRow=r, dropCol=c;
+  if(hoverCellKey){ const [hr,hc]=hoverCellKey.split(',').map(Number); dropRow=hr; dropCol=hc; }
+  const key=`${dropRow},${dropCol}`;
+  hoverCellKey=null;
+  const piece=board[dropRow][dropCol];
+  // Prefer using selected as the source if available (supports select-then-tap)
+  const source = selected ? { row: selected.row, col: selected.col } : dragFrom;
+  const sourcePiece = board[source.row][source.col];
+  // If dropping on a green candidate, eliminate using the selected/source
+  if(eliminationCandidates.has(key) && piece !== EMPTY){
+    dbg('pointerup eliminate via candidate',{from:source,to:{row:dropRow,col:dropCol}});
+    doEliminate(source,{row:dropRow,col:dropCol});
+    return;
+  }
+  // Otherwise, if same-piece straight path, eliminate
+  if(piece!==EMPTY && piece===sourcePiece && canConnect(source.row,source.col,dropRow,dropCol)){
+    dbg('pointerup eliminate',{from:source,to:{row:dropRow,col:dropCol}});
+    doEliminate(source,{row:dropRow,col:dropCol});
+    return;
+  }
+  // Otherwise try move if empty valid target (based on selected/source)
+  if(isEmpty(dropRow,dropCol) && validMoveTargets.has(key)){
+    dbg('pointerup move',{from:source,to:{row:dropRow,col:dropCol}});
+    tryMove(source,{row:dropRow,col:dropCol});
+    return;
+  }
+  render();
+  dbg('pointerup noop',{from:source,dropRow,dropCol});
+}
 
 function showAnyPairs(){ clearHighlights(); for(let r1=0;r1<ROWS;r1++){ for(let c1=0;c1<COLS;c1++){ const p=board[r1][c1]; if(p===EMPTY) continue; for(let c2=c1+1;c2<COLS;c2++){ if(board[r1][c2]===p && canConnect(r1,c1,r1,c2)){ eliminationCandidates.add(`${r1},${c1}`); eliminationCandidates.add(`${r1},${c2}`); render(); setMessage('存在可消除对（绿色高亮）。选择其中任意两个即可消除。'); dbg('showAnyPairs row pair',{r1,c1,c2,p}); return; } } for(let r2=r1+1;r2<ROWS;r2++){ if(board[r2][c1]===p && canConnect(r1,c1,r2,c1)){ eliminationCandidates.add(`${r1},${c1}`); eliminationCandidates.add(`${r2},${c1}`); render(); setMessage('存在可消除对（绿色高亮）。选择其中任意两个即可消除。'); dbg('showAnyPairs col pair',{r1,r2,c1,p}); return; } } } } setMessage('当前没有可直接消除的配对。'); dbg('showAnyPairs none'); }
 
