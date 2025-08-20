@@ -210,12 +210,16 @@ function onPointerUp(r,c){
 
 function showAnyPairs(){ clearHighlights(); for(let r1=0;r1<ROWS;r1++){ for(let c1=0;c1<COLS;c1++){ const p=board[r1][c1]; if(p===EMPTY) continue; for(let c2=c1+1;c2<COLS;c2++){ if(board[r1][c2]===p && canConnect(r1,c1,r1,c2)){ eliminationCandidates.add(`${r1},${c1}`); eliminationCandidates.add(`${r1},${c2}`); render(); setMessage('存在可消除对（绿色高亮）。选择其中任意两个即可消除。'); dbg('showAnyPairs row pair',{r1,c1,c2,p}); return; } } for(let r2=r1+1;r2<ROWS;r2++){ if(board[r2][c1]===p && canConnect(r1,c1,r2,c1)){ eliminationCandidates.add(`${r1},${c1}`); eliminationCandidates.add(`${r2},${c1}`); render(); setMessage('存在可消除对（绿色高亮）。选择其中任意两个即可消除。'); dbg('showAnyPairs col pair',{r1,r2,c1,p}); return; } } } } setMessage('当前没有可直接消除的配对。'); dbg('showAnyPairs none'); }
 
-elReset.addEventListener('click', resetGame);
-elShowPairs.addEventListener('click', showAnyPairs);
-elCancel.addEventListener('click', cancelSelection);
+if (elReset) elReset.addEventListener('click', resetGame);
+if (elShowPairs) elShowPairs.addEventListener('click', showAnyPairs);
+if (elCancel) elCancel.addEventListener('click', cancelSelection);
 
-// ESC 取消、右键取消
-window.addEventListener('keydown', (e)=>{ if(e.key==='Escape'){ cancelSelection(); }});
-elBoard.addEventListener('contextmenu', (e)=>{ e.preventDefault(); cancelSelection(); });
+// ESC 取消、右键取消（加保护）
+if (typeof window !== 'undefined') {
+  window.addEventListener('keydown', (e)=>{ if(e.key==='Escape'){ cancelSelection(); }});
+}
+if (elBoard && typeof elBoard.addEventListener === 'function') {
+  elBoard.addEventListener('contextmenu', (e)=>{ e.preventDefault(); cancelSelection(); });
+}
 
 resetGame();
