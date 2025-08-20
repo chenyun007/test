@@ -313,7 +313,14 @@ function onCellClick(r, c) {
         return;
     }
 
-    // Try direct elimination if clicking a same-piece with clear path
+    // Prefer elimination if this cell is highlighted as a candidate
+    const key = `${r},${c}`;
+    if (eliminationCandidates.has(key) && piece !== EMPTY) {
+        doEliminate(from, { row: r, col: c });
+        return;
+    }
+
+    // Fallback: check direct elimination by rules
     if (piece !== EMPTY && piece === selPiece && canConnect(from.row, from.col, r, c)) {
         doEliminate(from, { row: r, col: c });
         return;
@@ -331,7 +338,6 @@ function onCellClick(r, c) {
     }
 
     // Try move if clicking an empty valid target
-    const key = `${r},${c}`;
     if (piece === EMPTY && validMoveTargets.has(key)) {
         tryMove(from, { row: r, col: c });
         return;
